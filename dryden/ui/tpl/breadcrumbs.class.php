@@ -27,9 +27,9 @@ class ui_tpl_breadcrumbs {
 
             if($moduleRow){
                 $line .= '<ul class="breadcrumb">';
-                $line .= '  <li><a href=".">Home</a></li>';
-                $line .= '  <li><a href="./#' .$catUrl. '">' .$moduleRow['mc_name_vc']. '</a></li>';
-                $line .= '  <li class="active">' .$moduleRow['mo_name_vc']. '</li>';
+                $line .= '  <li><a href="."><: Home :></a></li>';
+                $line .= '  <li><a href="./#' .$catUrl. '"><: ' .$moduleRow['mc_name_vc']. ' :></a></li>';
+                $line .= '  <li class="active"><: ' .$moduleRow['mo_name_vc']. ' :></li>';
                 $line .= '</ul>';
             }
         }
