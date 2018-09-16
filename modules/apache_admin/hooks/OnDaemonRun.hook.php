@@ -11,6 +11,8 @@ if (ui_module::CheckModuleEnabled('Apache Config')) {
         }
         echo "Begin writing Apache Config to: " . ctrl_options::GetSystemOption('apache_vhost') . fs_filehandler::NewLine();
         WriteVhostConfigFile();
+        echo "Begin writing Apache Config to: /etc/php/5.6/fpm/pool.d/" . fs_filehandler::NewLine();
+        WriteFPMPoolConfigFiles();
     } else {
         echo "Apache Config has NOT changed...nothing to do." . fs_filehandler::NewLine();
     }
@@ -174,6 +176,15 @@ function WriteVhostConfigFile()
 
         $vhostPort = ( fs_director::CheckForEmptyValue($rowvhost['vh_custom_port_in']) ) ? $VHostDefaultPort : $rowvhost['vh_custom_port_in'];
 
+        $portForward = $rowvhost['vh_portforward_in'] <> 0;
+
+        $domainName = ( $rowvhost['vh_type_in'] == 1 ) ? $rowvhost['vh_name_vc'] : substr($rowvhost['vh_name_vc'], strpos($rowvhost['vh_name_vc'], '.') + 1);
+        $letsencryptdir = '/etc/letsencrypt/live/' . $domainName;
+        if (file_exists($letsencryptdir . '/cert.pem')) {
+            $vhostPort = '443';
+            $portForward = true;
+        }
+
         $vhostIp = ( fs_director::CheckForEmptyValue($rowvhost['vh_custom_ip_vc']) ) ? "*" : $rowvhost['vh_custom_ip_vc'];
 
         //Domain is enabled
@@ -213,7 +224,7 @@ function WriteVhostConfigFile()
                 $line .= "# END DOMAIN: " . $rowvhost['vh_name_vc'] . fs_filehandler::NewLine();
                 $line .= "################################################################" . fs_filehandler::NewLine();
                 $line .= fs_filehandler::NewLine();
-                if ($rowvhost['vh_portforward_in'] <> 0) {
+                if ($portForward) {
                     $line .= BuildVhostPortForward($rowvhost['vh_name_vc'], $vhostPort, $useremail);
                 }
                 $line .= fs_filehandler::NewLine();
@@ -248,7 +259,7 @@ function WriteVhostConfigFile()
                 $line .= "# END DOMAIN: " . $rowvhost['vh_name_vc'] . fs_filehandler::NewLine();
                 $line .= "################################################################" . fs_filehandler::NewLine();
                 $line .= fs_filehandler::NewLine();
-                if ($rowvhost['vh_portforward_in'] <> 0) {
+                if ($portForward) {
                     $line .= BuildVhostPortForward($rowvhost['vh_name_vc'], $vhostPort, $useremail);
                 }
                 $line .= fs_filehandler::NewLine();
@@ -283,7 +294,7 @@ function WriteVhostConfigFile()
                 $line .= "# END DOMAIN: " . $rowvhost['vh_name_vc'] . fs_filehandler::NewLine();
                 $line .= "################################################################" . fs_filehandler::NewLine();
                 $line .= fs_filehandler::NewLine();
-                if ($rowvhost['vh_portforward_in'] <> 0) {
+                if ($portForward) {
                     $line .= BuildVhostPortForward($rowvhost['vh_name_vc'], $vhostPort, $useremail);
                 }
                 $line .= fs_filehandler::NewLine();
@@ -390,12 +401,22 @@ function WriteVhostConfigFile()
                 $line .= "# Custom VH settings (if any exist)" . fs_filehandler::NewLine();
                 $line .= $rowvhost['vh_custom_tx'] . fs_filehandler::NewLine();
 
+                if ($vhostPort === '443') {
+                    $letsencryptdir = '/etc/letsencrypt/live/' . $rowvhost['vh_name_vc'] . '/cert.pem';
+                    $line .= "# Let's encrypt certificates" . fs_filehandler::NewLine();
+                    $line .= 'SSLEngine on' . fs_filehandler::NewLine();
+                    $line .= 'SSLCertificateFile      ' . $letsencryptdir . '/cert.pem' . fs_filehandler::NewLine();
+                    $line .= 'SSLCertificateKeyFile   ' . $letsencryptdir . '/privkey.pem' . fs_filehandler::NewLine();
+                    $line .= 'SSLCertificateChainFile ' . $letsencryptdir . '/fullchain.pem' . fs_filehandler::NewLine();
+                    $line .= 'Protocols h2 http/1.1' . fs_filehandler::NewLine();
+                }
+
                 // End Virtual Host Settings
                 $line .= "</virtualhost>" . fs_filehandler::NewLine();
                 $line .= "# END DOMAIN: " . $rowvhost['vh_name_vc'] . fs_filehandler::NewLine();
                 $line .= "################################################################" . fs_filehandler::NewLine();
                 $line .= fs_filehandler::NewLine();
-                if ($rowvhost['vh_portforward_in'] <> 0) {
+                if ($portForward) {
                     $line .= BuildVhostPortForward($rowvhost['vh_name_vc'], $vhostPort, $useremail);
                 }
                 $line .= fs_filehandler::NewLine();
@@ -470,6 +491,40 @@ function WriteVhostConfigFile()
     } else {
         return false;
     }
+}
+
+function WriteFPMPoolConfigFiles()
+{
+    global $zdbh;
+    $files = [];
+    $poolDir = '/etc/php/5.6/fpm/pool.d/';
+    // Sentora virtual host container configuration
+    $sql = $zdbh->prepare("SELECT * FROM x_vhosts WHERE vh_deleted_ts IS NULL");
+    $sql->execute();
+    while ($rowvhost = $sql->fetch()) {
+        $vhostuser = ctrl_users::GetUserDetail($rowvhost['vh_acc_fk']);
+        $domainName = $rowvhost['vh_name_vc'];
+        $rootDir = '"' . ctrl_options::GetSystemOption('hosted_dir') . $vhostuser['username'] . '/public_html' . $rowvhost['vh_directory_vc'] . '"';
+        ob_start();
+        include( __DIR__ . DIRECTORY_SEPARATOR . '/../code/templates/fpm_pool.php');
+        $fileContent = ob_get_clean();
+        $confFile = $poolDir . $domainName . '.conf';
+        $files[] = $confFile;
+        file_put_contents($confFile, $fileContent);
+    }
+    print_r($files);
+    foreach (glob($poolDir . '*.conf') as $filename) {
+        if ($filename != $poolDir . 'www.conf' && !in_array($filename, $files)) {
+            unlink($filename);
+        }
+    }
+    $command = ctrl_options::GetSystemOption('zsudo');
+    $args = array(
+        'systemctl',
+        'restart',
+        'php5.6-fpm.service'
+    );
+    $returnValue = ctrl_system::systemCommand($command, $args);
 }
 
 function CheckErrorDocument($error)
