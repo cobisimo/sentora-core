@@ -24,7 +24,7 @@ class ui_tpl_notice {
                 return ui_sysmessage::shout(
                     runtime_xss::xssClean($result['ac_notice_tx']),
                     'notice',
-                    'Notice:',
+                    ui_language::translate('Notice') . ':',
                     true
                 );
             return false;
