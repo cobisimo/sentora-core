@@ -402,7 +402,7 @@ function WriteVhostConfigFile()
                 $line .= $rowvhost['vh_custom_tx'] . fs_filehandler::NewLine();
 
                 if ($vhostPort === '443') {
-                    $letsencryptdir = '/etc/letsencrypt/live/' . $rowvhost['vh_name_vc'] . '/cert.pem';
+                    $letsencryptdir = '/etc/letsencrypt/live/' . $domainName;
                     $line .= "# Let's encrypt certificates" . fs_filehandler::NewLine();
                     $line .= 'SSLEngine on' . fs_filehandler::NewLine();
                     $line .= 'SSLCertificateFile      ' . $letsencryptdir . '/cert.pem' . fs_filehandler::NewLine();
